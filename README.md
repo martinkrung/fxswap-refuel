@@ -29,6 +29,9 @@ run with:
 scripts/refuel_zchf.py
 ```
 
-# set to True to fork the network
-# set to False to use the actual network
+Default is SIM, change in script to execute on-chain
+```
+#set to True to fork the network
+#set to False to use the actual network
 SIM = True
+```
