@@ -25,10 +25,7 @@ print(f"RPC: {RPC}")
 print(f"SINGER: {SINGER}")
 
 def account_load(fname):
-    if fname == "babe":
-        path = os.path.expanduser(os.path.join('~', '.brownie', 'accounts', fname + '.json'))
-    else:
-        path = os.path.expanduser(os.path.join('~', '.ape', 'accounts', fname + '.json'))
+    path = os.path.expanduser(os.path.join('~', '.ape', 'accounts', fname + '.json'))
     print(f"Loading account from: {path}")
     with open(path, 'r') as f:
         pkey = account.decode_keyfile_json(json.load(f), getpass())
