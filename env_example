@@ -2,8 +2,7 @@
 # warning, if you change things, you have to reload with source .env
 
 export DEPLOY_ADDRESS="0x...."
-
-export SINGER="yours"
+export SINGER="yourfilename"
 
 export XSCAN_CHAIN_ID=1
 export XSCAN_API_KEY="{insert_your_key}"
@@ -11,3 +10,4 @@ export XSCAN_API_URI="https://api.etherscan.io/v2/api?chainid=${XSCAN_CHAIN_ID}"
 export XSCAN_URL="https://etherscan.io"
 
 export RPC="https://eth-mainnet.g.alchemy.com/v2/{insert_your_key}"
+
