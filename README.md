@@ -1,11 +1,10 @@
-# Example contract how to refuel a pool with 5% TVL 
+# Tool to refuel a pool with desired amount of USD/APR per Year
 
 ## What is this
 
 This is a script which withdraws a defined amount of LP tokens from a pool and re-adds the amount as refuel.
 Users are prompted for a USD amount, which is then used to calculate the needed share.
 The address needs unstaked LP tokens from the pool to be used in refueling.
-
 
 ## Preview
 
@@ -120,9 +119,8 @@ source .env_ethereum
 config:
 
 add your pool to the config/fxswap.json and adjust index in the code 
-or  set the pool address it direclty in the code
+or set the pool address it directly in the code. (line 95-102)
 
-line 95-102
 
 run with:
 
