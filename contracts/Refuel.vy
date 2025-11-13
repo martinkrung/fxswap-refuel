@@ -1,9 +1,9 @@
 #pragma version ^0.4.3
 
 """
-@title FXSwap Refuel Contract
+@title FXSwap Refuel Contract (Blueprint)
 @notice Handles refueling of FXSwap pools by withdrawing LP tokens and re-adding them as donations
-@dev This contract manages LP token-based refueling with donation share threshold checks
+@dev This contract is designed to be deployed as a blueprint for efficient factory deployment
 """
 
 from ethereum.ercs import IERC20
@@ -27,6 +27,10 @@ interface IFXSwapPool:
     def calc_token_amount(amounts: uint256[2], is_deposit: bool) -> uint256: view
 
 # Events
+event Initialized:
+    owner: indexed(address)
+    timestamp: uint256
+
 event PoolSet:
     pool: indexed(address)
     timestamp: uint256
@@ -44,6 +48,12 @@ event Refueled:
     token0_amount: uint256
     token1_amount: uint256
     donated_lp: uint256
+    fee_amount: uint256
+    timestamp: uint256
+
+event FeePaid:
+    recipient: indexed(address)
+    amount: uint256
     timestamp: uint256
 
 event OwnershipTransferred:
@@ -51,21 +61,48 @@ event OwnershipTransferred:
     new_owner: indexed(address)
 
 # State variables
+initialized: public(bool)
 owner: public(address)
 pool: public(address)
 refuel_lp_amount: public(uint256)  # LP token amount to refuel (not USD based)
 donation_share_threshold: public(uint256)  # Threshold for donation share (in basis points, e.g., 9500 = 95%)
+fee_bps: public(uint256)  # Fee in basis points (e.g., 500 = 5%)
+fee_recipient: public(address)  # Address to receive fees
 
 # Constants
 PRECISION: constant(uint256) = 10000  # Basis points precision (100% = 10000)
+DEFAULT_THRESHOLD: constant(uint256) = 9500  # Default: 95%
+DEFAULT_FEE_BPS: constant(uint256) = 500  # Default fee: 5%
 
 @deploy
 def __init__():
     """
-    @notice Contract constructor
+    @notice Blueprint constructor - does minimal initialization
+    @dev Actual initialization happens via initialize() function
     """
-    self.owner = msg.sender
-    self.donation_share_threshold = 9500  # Default: 95% (donations must be at least 95% of minted LP)
+    # Blueprint contracts should not initialize state in __init__
+    # This allows the factory to deploy multiple instances efficiently
+    pass
+
+@external
+def initialize(owner_address: address, fee_recipient_address: address):
+    """
+    @notice Initialize the contract (called by factory after deployment)
+    @param owner_address Address of the contract owner
+    @param fee_recipient_address Address to receive fees (can be factory or other address)
+    @dev Can only be called once
+    """
+    assert not self.initialized, "Already initialized"
+    assert owner_address != empty(address), "Invalid owner address"
+    assert fee_recipient_address != empty(address), "Invalid fee recipient address"
+
+    self.initialized = True
+    self.owner = owner_address
+    self.donation_share_threshold = DEFAULT_THRESHOLD
+    self.fee_bps = DEFAULT_FEE_BPS
+    self.fee_recipient = fee_recipient_address
+
+    log Initialized(owner=owner_address, timestamp=block.timestamp)
 
 @external
 def set_pool(new_pool: address):
@@ -73,6 +110,7 @@ def set_pool(new_pool: address):
     @notice Set the FXSwap pool address
     @param new_pool Address of the FXSwap pool contract
     """
+    assert self.initialized, "Not initialized"
     assert msg.sender == self.owner, "Only owner"
     assert new_pool != empty(address), "Invalid pool address"
 
@@ -85,6 +123,7 @@ def set_refuel_amount(lp_amount: uint256):
     @notice Set the LP token amount to use for refueling
     @param lp_amount Amount of LP tokens (not USD based)
     """
+    assert self.initialized, "Not initialized"
     assert msg.sender == self.owner, "Only owner"
     assert lp_amount > 0, "Amount must be positive"
 
@@ -97,6 +136,7 @@ def set_donation_threshold(threshold: uint256):
     @notice Set the donation share threshold (in basis points)
     @param threshold Minimum donation share required (e.g., 9500 = 95%)
     """
+    assert self.initialized, "Not initialized"
     assert msg.sender == self.owner, "Only owner"
     assert threshold <= PRECISION, "Threshold cannot exceed 100%"
 
@@ -106,10 +146,11 @@ def set_donation_threshold(threshold: uint256):
 @external
 def refuel() -> uint256:
     """
-    @notice Execute the refuel operation
-    @dev Withdraws LP tokens from pool and re-adds them as donation
-    @return The amount of LP tokens donated
+    @notice Execute the refuel operation with fee deduction
+    @dev Withdraws LP tokens from pool, takes fee, and re-adds remaining as donation
+    @return The amount of LP tokens donated (after fee)
     """
+    assert self.initialized, "Not initialized"
     assert self.pool != empty(address), "Pool not set"
     assert self.refuel_lp_amount > 0, "Refuel amount not set"
 
@@ -120,12 +161,22 @@ def refuel() -> uint256:
     lp_balance: uint256 = staticcall lp_token.balanceOf(self)
     assert lp_balance >= self.refuel_lp_amount, "Insufficient LP tokens"
 
-    # Step 1: Remove liquidity to get underlying tokens
+    # Calculate fee amount from LP tokens
+    fee_amount: uint256 = (self.refuel_lp_amount * self.fee_bps) // PRECISION
+    lp_amount_after_fee: uint256 = self.refuel_lp_amount - fee_amount
+
+    # Transfer fee to fee recipient
+    if fee_amount > 0:
+        success: bool = extcall lp_token.transfer(self.fee_recipient, fee_amount)
+        assert success, "Fee transfer failed"
+        log FeePaid(recipient=self.fee_recipient, amount=fee_amount, timestamp=block.timestamp)
+
+    # Step 1: Remove liquidity to get underlying tokens (using amount after fee)
     pool: IFXSwapPool = IFXSwapPool(self.pool)
     min_amounts: uint256[2] = [0, 0]  # No slippage protection for simplicity
 
     token_amounts: uint256[2] = extcall pool.remove_liquidity(
-        self.refuel_lp_amount,
+        lp_amount_after_fee,
         min_amounts,
         self
     )
@@ -134,9 +185,9 @@ def refuel() -> uint256:
     calc_lp_donated: uint256 = staticcall pool.calc_token_amount(token_amounts, True)
 
     # Step 3: Check donation share threshold
-    # donation_share = calc_lp_donated / refuel_lp_amount
-    # We want: (calc_lp_donated * PRECISION) / refuel_lp_amount >= donation_share_threshold
-    donation_share: uint256 = (calc_lp_donated * PRECISION) // self.refuel_lp_amount
+    # donation_share = calc_lp_donated / lp_amount_after_fee
+    # We want: (calc_lp_donated * PRECISION) / lp_amount_after_fee >= donation_share_threshold
+    donation_share: uint256 = (calc_lp_donated * PRECISION) // lp_amount_after_fee
     assert donation_share >= self.donation_share_threshold, "Donation share below threshold"
 
     # Step 4: Approve pool to spend tokens
@@ -160,6 +211,7 @@ def refuel() -> uint256:
         token0_amount=token_amounts[0],
         token1_amount=token_amounts[1],
         donated_lp=donated_lp,
+        fee_amount=fee_amount,
         timestamp=block.timestamp
     )
 
@@ -171,6 +223,7 @@ def withdraw_lp_tokens(amount: uint256):
     @notice Withdraw LP tokens from the contract
     @param amount Amount of LP tokens to withdraw
     """
+    assert self.initialized, "Not initialized"
     assert msg.sender == self.owner, "Only owner"
     assert self.pool != empty(address), "Pool not set"
 
@@ -185,6 +238,7 @@ def withdraw_tokens(token: address, amount: uint256):
     @param token Token address to withdraw
     @param amount Amount to withdraw
     """
+    assert self.initialized, "Not initialized"
     assert msg.sender == self.owner, "Only owner"
     success: bool = extcall IERC20(token).transfer(msg.sender, amount)
     assert success, "Transfer failed"
@@ -195,6 +249,7 @@ def transfer_ownership(new_owner: address):
     @notice Transfer ownership of the contract
     @param new_owner Address of the new owner
     """
+    assert self.initialized, "Not initialized"
     assert msg.sender == self.owner, "Only owner"
     assert new_owner != empty(address), "Invalid new owner"
 
