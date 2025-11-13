@@ -54,14 +54,9 @@ def __init__(blueprint_address: address):
     self.blueprint = blueprint_address
     self.deployment_count = 0
 
-@external
-def deploy_refuel(owner_address: address, fee_recipient_address: address) -> address:
-    """
-    @notice Deploy a new Refuel contract instance from the blueprint
-    @param owner_address Address that will own the deployed Refuel contract
-    @param fee_recipient_address Address to receive fees (default: this factory)
-    @return Address of the deployed Refuel contract
-    """
+@internal
+def _deploy_refuel_internal(owner_address: address, fee_recipient_address: address) -> address:
+    """Internal function to deploy Refuel contract"""
     assert owner_address != empty(address), "Invalid owner address"
 
     # Use factory as fee recipient if zero address is provided
@@ -70,11 +65,7 @@ def deploy_refuel(owner_address: address, fee_recipient_address: address) -> add
         actual_fee_recipient = self
 
     # Deploy new Refuel contract from blueprint
-    refuel_contract: address = create_from_blueprint(
-        self.blueprint,
-        code_offset=3,
-        add_to_active_list=True
-    )
+    refuel_contract: address = create_from_blueprint(self.blueprint)
 
     # Initialize the deployed contract
     extcall IRefuel(refuel_contract).initialize(owner_address, actual_fee_recipient)
@@ -93,13 +84,23 @@ def deploy_refuel(owner_address: address, fee_recipient_address: address) -> add
     return refuel_contract
 
 @external
+def deploy_refuel(owner_address: address, fee_recipient_address: address) -> address:
+    """
+    @notice Deploy a new Refuel contract instance from the blueprint
+    @param owner_address Address that will own the deployed Refuel contract
+    @param fee_recipient_address Address to receive fees (default: this factory)
+    @return Address of the deployed Refuel contract
+    """
+    return self._deploy_refuel_internal(owner_address, fee_recipient_address)
+
+@external
 def deploy_refuel_simple(owner_address: address) -> address:
     """
     @notice Deploy a new Refuel contract with factory as fee recipient
     @param owner_address Address that will own the deployed Refuel contract
     @return Address of the deployed Refuel contract
     """
-    return self.deploy_refuel(owner_address, empty(address))
+    return self._deploy_refuel_internal(owner_address, empty(address))
 
 @external
 def update_blueprint(new_blueprint: address):
