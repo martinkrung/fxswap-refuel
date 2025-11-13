@@ -1,4 +1,4 @@
-#pragma version ^4.3.0
+#pragma version ^0.4.3
 
 """
 @title FXSwap Refuel Contract
@@ -59,7 +59,7 @@ donation_share_threshold: public(uint256)  # Threshold for donation share (in ba
 # Constants
 PRECISION: constant(uint256) = 10000  # Basis points precision (100% = 10000)
 
-@external
+@deploy
 def __init__():
     """
     @notice Contract constructor
@@ -77,7 +77,7 @@ def set_pool(new_pool: address):
     assert new_pool != empty(address), "Invalid pool address"
 
     self.pool = new_pool
-    log PoolSet(new_pool, block.timestamp)
+    log PoolSet(pool=new_pool, timestamp=block.timestamp)
 
 @external
 def set_refuel_amount(lp_amount: uint256):
@@ -89,7 +89,7 @@ def set_refuel_amount(lp_amount: uint256):
     assert lp_amount > 0, "Amount must be positive"
 
     self.refuel_lp_amount = lp_amount
-    log RefuelAmountSet(lp_amount, block.timestamp)
+    log RefuelAmountSet(amount=lp_amount, timestamp=block.timestamp)
 
 @external
 def set_donation_threshold(threshold: uint256):
@@ -101,7 +101,7 @@ def set_donation_threshold(threshold: uint256):
     assert threshold <= PRECISION, "Threshold cannot exceed 100%"
 
     self.donation_share_threshold = threshold
-    log ThresholdSet(threshold, block.timestamp)
+    log ThresholdSet(threshold=threshold, timestamp=block.timestamp)
 
 @external
 def refuel() -> uint256:
@@ -117,38 +117,38 @@ def refuel() -> uint256:
     lp_token: IERC20 = IERC20(self.pool)
 
     # Check this contract has enough LP tokens
-    lp_balance: uint256 = lp_token.balanceOf(self)
+    lp_balance: uint256 = staticcall lp_token.balanceOf(self)
     assert lp_balance >= self.refuel_lp_amount, "Insufficient LP tokens"
 
     # Step 1: Remove liquidity to get underlying tokens
     pool: IFXSwapPool = IFXSwapPool(self.pool)
     min_amounts: uint256[2] = [0, 0]  # No slippage protection for simplicity
 
-    token_amounts: uint256[2] = pool.remove_liquidity(
+    token_amounts: uint256[2] = extcall pool.remove_liquidity(
         self.refuel_lp_amount,
         min_amounts,
         self
     )
 
     # Step 2: Calculate expected LP tokens from re-adding (with donation)
-    calc_lp_donated: uint256 = pool.calc_token_amount(token_amounts, True)
+    calc_lp_donated: uint256 = staticcall pool.calc_token_amount(token_amounts, True)
 
     # Step 3: Check donation share threshold
     # donation_share = calc_lp_donated / refuel_lp_amount
     # We want: (calc_lp_donated * PRECISION) / refuel_lp_amount >= donation_share_threshold
-    donation_share: uint256 = (calc_lp_donated * PRECISION) / self.refuel_lp_amount
+    donation_share: uint256 = (calc_lp_donated * PRECISION) // self.refuel_lp_amount
     assert donation_share >= self.donation_share_threshold, "Donation share below threshold"
 
     # Step 4: Approve pool to spend tokens
-    token0: address = pool.coins(0)
-    token1: address = pool.coins(1)
+    token0: address = staticcall pool.coins(0)
+    token1: address = staticcall pool.coins(1)
 
-    IERC20(token0).approve(self.pool, token_amounts[0])
-    IERC20(token1).approve(self.pool, token_amounts[1])
+    extcall IERC20(token0).approve(self.pool, token_amounts[0])
+    extcall IERC20(token1).approve(self.pool, token_amounts[1])
 
     # Step 5: Add liquidity as donation (LP tokens minted to zero address)
     min_mint: uint256 = calc_lp_donated  # Expect at least what we calculated
-    donated_lp: uint256 = pool.add_liquidity(
+    donated_lp: uint256 = extcall pool.add_liquidity(
         token_amounts,
         min_mint,
         empty(address),  # Receiver is zero address (burned)
@@ -156,11 +156,11 @@ def refuel() -> uint256:
     )
 
     log Refueled(
-        self.refuel_lp_amount,
-        token_amounts[0],
-        token_amounts[1],
-        donated_lp,
-        block.timestamp
+        lp_amount=self.refuel_lp_amount,
+        token0_amount=token_amounts[0],
+        token1_amount=token_amounts[1],
+        donated_lp=donated_lp,
+        timestamp=block.timestamp
     )
 
     return donated_lp
@@ -175,7 +175,8 @@ def withdraw_lp_tokens(amount: uint256):
     assert self.pool != empty(address), "Pool not set"
 
     lp_token: IERC20 = IERC20(self.pool)
-    assert lp_token.transfer(msg.sender, amount), "Transfer failed"
+    success: bool = extcall lp_token.transfer(msg.sender, amount)
+    assert success, "Transfer failed"
 
 @external
 def withdraw_tokens(token: address, amount: uint256):
@@ -185,7 +186,8 @@ def withdraw_tokens(token: address, amount: uint256):
     @param amount Amount to withdraw
     """
     assert msg.sender == self.owner, "Only owner"
-    assert IERC20(token).transfer(msg.sender, amount), "Transfer failed"
+    success: bool = extcall IERC20(token).transfer(msg.sender, amount)
+    assert success, "Transfer failed"
 
 @external
 def transfer_ownership(new_owner: address):
@@ -198,7 +200,7 @@ def transfer_ownership(new_owner: address):
 
     old_owner: address = self.owner
     self.owner = new_owner
-    log OwnershipTransferred(old_owner, new_owner)
+    log OwnershipTransferred(previous_owner=old_owner, new_owner=new_owner)
 
 @view
 @external
@@ -209,7 +211,7 @@ def get_lp_balance() -> uint256:
     """
     if self.pool == empty(address):
         return 0
-    return IERC20(self.pool).balanceOf(self)
+    return staticcall IERC20(self.pool).balanceOf(self)
 
 @view
 @external
@@ -225,17 +227,17 @@ def calculate_donation_share() -> uint256:
     pool: IFXSwapPool = IFXSwapPool(self.pool)
 
     # Get current pool state
-    balance0: uint256 = pool.balances(0)
-    balance1: uint256 = pool.balances(1)
-    total_supply: uint256 = pool.totalSupply()
+    balance0: uint256 = staticcall pool.balances(0)
+    balance1: uint256 = staticcall pool.balances(1)
+    total_supply: uint256 = staticcall pool.totalSupply()
 
     # Calculate proportional token amounts
-    token0_amount: uint256 = (balance0 * self.refuel_lp_amount) / total_supply
-    token1_amount: uint256 = (balance1 * self.refuel_lp_amount) / total_supply
+    token0_amount: uint256 = (balance0 * self.refuel_lp_amount) // total_supply
+    token1_amount: uint256 = (balance1 * self.refuel_lp_amount) // total_supply
 
     # Calculate LP tokens that would be minted
     amounts: uint256[2] = [token0_amount, token1_amount]
-    calc_lp: uint256 = pool.calc_token_amount(amounts, True)
+    calc_lp: uint256 = staticcall pool.calc_token_amount(amounts, True)
 
     # Calculate donation share in basis points
-    return (calc_lp * PRECISION) / self.refuel_lp_amount
+    return (calc_lp * PRECISION) // self.refuel_lp_amount

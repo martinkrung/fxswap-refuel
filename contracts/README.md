@@ -181,16 +181,16 @@ if donation_share >= 9500:
 
 ## Compilation
 
-Compile with Vyper 4.3.0 or later:
+Compile with Vyper 0.4.3 or later:
 
 ```bash
 vyper contracts/Refuel.vy
 ```
 
-**Note**: This contract uses Vyper 4.3.0 syntax with the following key features:
-- `#pragma version ^4.3.0` version pragma
+**Note**: This contract uses Vyper 0.4.3 syntax with the following key features:
+- `#pragma version ^0.4.3` version pragma
 - `from ethereum.ercs import IERC20` for ERC20 interface imports
-- Modern Vyper 4.x syntax and type system
+- Modern Vyper 0.4.x syntax and type system
 
 ## License
 
