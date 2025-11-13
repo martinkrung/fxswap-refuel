@@ -1,4 +1,4 @@
-# @version ^0.3.10
+#pragma version ^4.3.0
 
 """
 @title FXSwap Refuel Contract
@@ -6,7 +6,7 @@
 @dev This contract manages LP token-based refueling with donation share threshold checks
 """
 
-from vyper.interfaces import ERC20
+from ethereum.ercs import IERC20
 
 # Interfaces
 interface IFXSwapPool:
@@ -114,7 +114,7 @@ def refuel() -> uint256:
     assert self.refuel_lp_amount > 0, "Refuel amount not set"
 
     # Get LP token contract
-    lp_token: ERC20 = ERC20(self.pool)
+    lp_token: IERC20 = IERC20(self.pool)
 
     # Check this contract has enough LP tokens
     lp_balance: uint256 = lp_token.balanceOf(self)
@@ -143,8 +143,8 @@ def refuel() -> uint256:
     token0: address = pool.coins(0)
     token1: address = pool.coins(1)
 
-    ERC20(token0).approve(self.pool, token_amounts[0])
-    ERC20(token1).approve(self.pool, token_amounts[1])
+    IERC20(token0).approve(self.pool, token_amounts[0])
+    IERC20(token1).approve(self.pool, token_amounts[1])
 
     # Step 5: Add liquidity as donation (LP tokens minted to zero address)
     min_mint: uint256 = calc_lp_donated  # Expect at least what we calculated
@@ -174,7 +174,7 @@ def withdraw_lp_tokens(amount: uint256):
     assert msg.sender == self.owner, "Only owner"
     assert self.pool != empty(address), "Pool not set"
 
-    lp_token: ERC20 = ERC20(self.pool)
+    lp_token: IERC20 = IERC20(self.pool)
     assert lp_token.transfer(msg.sender, amount), "Transfer failed"
 
 @external
@@ -185,7 +185,7 @@ def withdraw_tokens(token: address, amount: uint256):
     @param amount Amount to withdraw
     """
     assert msg.sender == self.owner, "Only owner"
-    assert ERC20(token).transfer(msg.sender, amount), "Transfer failed"
+    assert IERC20(token).transfer(msg.sender, amount), "Transfer failed"
 
 @external
 def transfer_ownership(new_owner: address):
@@ -209,7 +209,7 @@ def get_lp_balance() -> uint256:
     """
     if self.pool == empty(address):
         return 0
-    return ERC20(self.pool).balanceOf(self)
+    return IERC20(self.pool).balanceOf(self)
 
 @view
 @external
